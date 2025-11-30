@@ -44,7 +44,6 @@ jobs:
 
       - name: Install Android commandline tools (via action)
         uses: android-actions/setup-android@v3
-        # do NOT pass 'packages' here; we'll call sdkmanager explicitly next
         with:
           cmdline-tools-version: 'latest'
 
@@ -55,17 +54,10 @@ jobs:
           PATH: ${{ env.ANDROID_HOME }}/cmdline-tools/latest/bin:${{ env.ANDROID_HOME }}/platform-tools:${PATH}
         run: |
           set -eux
-          # show sdkmanager path for debugging
           which sdkmanager || true
           sdkmanager --version || true
-
-          # Accept licenses first (non-interactive)
           yes | sdkmanager --licenses || true
-
-          # Install the required packages with explicit quoting -- this avoids newline concatenation issues
-          sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.2"
-
-          # show installed packages
+          sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.2" || true
           sdkmanager --list || true
 
       - name: Verify Android SDK (debug)
@@ -81,14 +73,12 @@ jobs:
         run: |
           set -eux
           npm install -g @capacitor/cli@5
-          # Try to add android platform if it doesn't exist
           if [ ! -d "./android" ]; then
             echo "android folder not found — attempting to add android platform via Capacitor"
             npx cap add android || true
           else
             echo "android folder exists"
           fi
-          # copy web build into native project
           npx cap sync android || true
 
       - name: Build Android APK (Gradle assembleDebug)
@@ -105,13 +95,12 @@ jobs:
             ./gradlew assembleDebug --no-daemon --stacktrace
           else
             echo "gradlew not found in android directory — cannot run Gradle build"
-            echo "List android dir contents for debugging:"
             ls -la android || true
             exit 1
           fi
 
       - name: Debug: show android build outputs
-        if: always()
+        if: ${{ always() }}
         run: |
           echo "==== android directory (root) ===="
           ls -la android || true
@@ -123,7 +112,7 @@ jobs:
           find android -type f -name "*.apk" -exec ls -la {} \; || true
 
       - name: Upload any APK artifacts found
-        if: always()
+        if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
           name: getwork-apks
