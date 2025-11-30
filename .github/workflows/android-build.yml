@@ -11,6 +11,9 @@ jobs:
     env:
       NODE_VERSION: '18'
       JAVA_VERSION: '17'
+      # Android SDK vars used by setup-android action
+      ANDROID_API_LEVEL: '33'
+      BUILD_TOOLS_VERSION: '33.0.2'
 
     steps:
       - name: Checkout repository
@@ -48,9 +51,10 @@ jobs:
             platforms;android-33
             build-tools;33.0.2
 
-      - name: Verify Android SDK
+      - name: Verify Android SDK (debug)
         run: |
           echo "ANDROID_HOME: $ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
           sdkmanager --list || true
           adb --version || true
 
@@ -59,12 +63,17 @@ jobs:
           JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
           ANDROID_SDK_ROOT: ${{ env.ANDROID_HOME }}
         run: |
+          set -eux
           npm install -g @capacitor/cli@5
-          # Try to add android platform if it doesn't exist (may fail depending on config)
+          # Try to add android platform if it doesn't exist
           if [ ! -d "./android" ]; then
-            echo "Adding android platform"
+            echo "android folder not found — attempting to add android platform via Capacitor"
+            # Will create android/ if capacitor.config.json is correct (appId/appName/webDir)
             npx cap add android || true
+          else
+            echo "android folder exists"
           fi
+          # copy web assets into native project
           npx cap sync android || true
 
       - name: Build Android APK (Gradle assembleDebug)
@@ -75,17 +84,34 @@ jobs:
           ANDROID_HOME: ${{ env.ANDROID_HOME }}
           PATH: ${{ env.ANDROID_HOME }}/platform-tools:${PATH}
         run: |
+          set -eux
           if [ -f ./gradlew ]; then
-            chmod +x ./gradlew
-            ./gradlew assembleDebug --no-daemon
+            chmod +x ./gradlew || true
+            ./gradlew assembleDebug --no-daemon --stacktrace
           else
             echo "gradlew not found in android directory — cannot run Gradle build"
+            echo "List android dir contents for debugging:"
+            ls -la android || true
             exit 1
           fi
 
-      - name: Upload debug APK artifact
+      - name: Debug: show android build outputs
+        if: always()
+        run: |
+          echo "==== android directory (root) ===="
+          ls -la android || true
+          echo "==== android/app (if exists) ===="
+          ls -la android/app || true
+          echo "==== android/app/build outputs (recursive) ===="
+          ls -R android/app/build/outputs || true
+          echo "==== find any apk files ===="
+          find android -type f -name "*.apk" -exec ls -la {} \; || true
+
+      - name: Upload any APK artifacts found
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: getwork-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: getwork-apks
+          path: |
+            android/app/build/outputs/**/*.apk
+            android/**/outputs/**/*.apk
