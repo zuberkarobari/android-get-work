@@ -1,0 +1,66 @@
+name: Build Android APK (Capacitor + Vite)
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      NODE_VERSION: '18'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          npm ci
+
+      - name: Build web assets (Vite)
+        run: |
+          npm run build
+
+      # Install Capacitor CLI (global) and Android CLI tools via sdkmanager
+      - name: Install Java and Android SDK
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y openjdk-17-jdk unzip wget
+          export ANDROID_HOME=$HOME/Android/Sdk
+          mkdir -p $ANDROID_HOME
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-10125470_latest.zip -O /tmp/cmdline.zip
+          unzip -q /tmp/cmdline.zip -d $HOME/cmdline-tools
+          mkdir -p $ANDROID_HOME/cmdline-tools/latest
+          mv $HOME/cmdline-tools/cmdline-tools/* $ANDROID_HOME/cmdline-tools/latest/
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --sdk_root=$ANDROID_HOME "platform-tools" "platforms;android-33" "build-tools;33.0.2"
+
+      - name: Install Capacitor CLI
+        run: |
+          npm install -g @capacitor/cli@5
+
+      - name: Prepare Capacitor Android project
+        run: |
+          npx cap sync android
+        env:
+          ANDROID_HOME: ${{ runner.temp }}/Android/Sdk
+
+      - name: Build Android APK (Gradle assembleDebug)
+        working-directory: android
+        run: |
+          chmod +x ./gradlew
+          ./gradlew assembleDebug --no-daemon
+        env:
+          JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
+          ANDROID_SDK_ROOT: $HOME/Android/Sdk
+
+      - name: Upload debug APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: getwork-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
