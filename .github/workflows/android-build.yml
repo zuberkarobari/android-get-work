@@ -3,10 +3,10 @@ name: Build Android APK
 on:
   push:
     branches:
-      - main  # Change this if your main branch is named differently (e.g., master)
+      - master  # Change this if your main branch is named differently (e.g., master)
   pull_request:
     branches:
-      - main
+      - master
 
 jobs:
   build:
