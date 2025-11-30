@@ -1,0 +1,28 @@
+image: mingc/android-build-box:latest
+
+pipelines:
+  default:
+    - step:
+        name: Build Android APK
+        caches:
+          - node
+          - gradle
+        script:
+          # 1. Install Node dependencies
+          - npm install
+
+          # 2. Build the Web App (React)
+          - npm run build
+
+          # 3. Initialize Capacitor & Android Platform
+          - npx cap add android
+          - npx cap sync android
+
+          # 4. Build the APK using Gradle
+          - cd android
+          - chmod +x gradlew
+          - ./gradlew assembleDebug
+
+        # 5. Save the APK so you can download it
+        artifacts:
+          - android/app/build/outputs/apk/debug/app-debug.apk
