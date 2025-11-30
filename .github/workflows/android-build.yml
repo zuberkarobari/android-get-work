@@ -1,4 +1,4 @@
-name: Build Android APK (Capacitor + Vite)
+name: Android CI - Build APK
 
 on:
   push:
@@ -6,79 +6,53 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-apk:
+  build:
     runs-on: ubuntu-latest
     env:
-      NODE_VERSION: '18'
-      JAVA_VERSION: '17'
+      ANDROID_SDK_ROOT: ${{ runner.temp }}/android-sdk
+
     steps:
-      - name: Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
         with:
-          fetch-depth: 0
+          distribution: 'temurin'
+          java-version: '17'
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build web assets (Vite)
-        run: npm run build
-
-      - name: Install Java
+      - name: Make gradlew executable
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y openjdk-${{ env.JAVA_VERSION }}-jdk unzip wget
+          if [ -f ./gradlew ]; then chmod +x ./gradlew; fi
 
-      - name: Install Android SDK cmdline tools and platforms
-        env:
-          ANDROID_SDK_ROOT: ${{ runner.temp }}/android-sdk
+      - name: Install Android SDK & build tools
         run: |
-          set -e
-          export ANDROID_SDK_ROOT=${{ runner.temp }}/android-sdk
           mkdir -p $ANDROID_SDK_ROOT/cmdline-tools
-          wget -q https://dl.google.com/android/repository/commandlinetools-linux-10125470_latest.zip -O /tmp/cmdline.zip
-          unzip -q /tmp/cmdline.zip -d $ANDROID_SDK_ROOT/cmdline-tools
-          # Move to 'latest' path expected by sdkmanager
-          mkdir -p $ANDROID_SDK_ROOT/cmdline-tools/latest
-          mv $ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools/* $ANDROID_SDK_ROOT/cmdline-tools/latest/
-          yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --sdk_root=$ANDROID_SDK_ROOT --install "platform-tools" "platforms;android-33" "build-tools;33.0.2"
+          cd $ANDROID_SDK_ROOT
+          curl -sSf -o sdk-tools.zip "https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip"
+          unzip -q sdk-tools.zip -d cmdline-tools
+          mv cmdline-tools/cmdline-tools cmdline-tools/latest || true
+          export PATH=$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$PATH
+          yes | sdkmanager --sdk_root=${ANDROID_SDK_ROOT} --licenses
+          sdkmanager --sdk_root=${ANDROID_SDK_ROOT} "platform-tools" "platforms;android-34" "build-tools;34.0.0"
 
-      - name: Setup Capacitor (global) and Android build env
-        env:
-          ANDROID_SDK_ROOT: ${{ runner.temp }}/android-sdk
-          JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
+      - name: Show java/gradle info
         run: |
-          npm install -g @capacitor/cli@5
-          # Ensure web assets are copied and Capacitor project is prepared
-          npx cap sync android || true
+          java -version
+          if [ -f ./gradlew ]; then ./gradlew --version; else gradle --version || true; fi
 
-      - name: Ensure android folder exists (if not, create)
-        if: always()
+      - name: Build debug APK
         run: |
-          # If npx cap add android was not run previously (no android folder), try to add it.
-          if [ ! -d "./android" ]; then
-            echo "android folder missing — adding Android platform via Capacitor"
-            npx cap add android || true
-          else
-            echo "android folder exists"
-          fi
+          if [ -f ./gradlew ]; then ./gradlew assembleDebug --no-daemon; else gradle assembleDebug --no-daemon; fi
 
-      - name: Build Android APK (Gradle assembleDebug)
-        working-directory: android
-        env:
-          ANDROID_SDK_ROOT: ${{ runner.temp }}/android-sdk
-          JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
+      - name: Collect APK artifacts
         run: |
-          chmod +x ./gradlew || true
-          ./gradlew assembleDebug --no-daemon
+          mkdir -p build-artifacts
+          find . -type f -path "*/app/build/outputs/apk/**/*.apk" -exec cp --parents "{}" build-artifacts/ \; || true
+          ls -la build-artifacts || true
 
-      - name: Upload debug APK artifact
+      - name: Upload APK artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: getwork-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: apk-artifacts
+          path: build-artifacts/**/*
