@@ -11,6 +11,7 @@ jobs:
     env:
       NODE_VERSION: '18'
       JAVA_VERSION: '17'
+      CMDLINE_URL: 'https://dl.google.com/android/repository/commandlinetools-linux-10125470_latest.zip'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -33,13 +34,13 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y openjdk-${{ env.JAVA_VERSION }}-jdk unzip wget zip lib32stdc++6 lib32gcc-s1
 
-      - name: Install Android SDK cmdline tools and platforms
+      - name: Install Android SDK cmdline tools and platforms (robust download)
         env:
           ANDROID_SDK_ROOT: ${{ runner.temp }}/android-sdk
+          CMDLINE_URL: ${{ env.CMDLINE_URL }}
         run: |
           set -eux
 
-          # ensure basic tools present
           sudo apt-get update -y
           sudo apt-get install -y unzip wget zip lib32stdc++6 lib32gcc-s1
 
@@ -47,9 +48,40 @@ jobs:
           mkdir -p "$ANDROID_SDK_ROOT"
           cd "$ANDROID_SDK_ROOT"
 
-          # Download the command line tools zip
           TMP_ZIP=/tmp/cmdline.zip
-          wget -q -O "$TMP_ZIP" "https://dl.google.com/android/repository/commandlinetools-linux-10125470_latest.zip"
+          MAX_ATTEMPTS=5
+          attempt=0
+          success=0
+
+          while [ $attempt -lt $MAX_ATTEMPTS ]; do
+            attempt=$((attempt+1))
+            echo "Download attempt $attempt/$MAX_ATTEMPTS..."
+            # try wget first
+            if wget -q -O "$TMP_ZIP" "$CMDLINE_URL"; then
+              echo "Downloaded with wget"
+              success=1
+              break
+            fi
+            # fallback to curl
+            if command -v curl >/dev/null 2>&1 && curl -fSL -o "$TMP_ZIP" "$CMDLINE_URL"; then
+              echo "Downloaded with curl"
+              success=1
+              break
+            fi
+            echo "Download attempt $attempt failed; sleeping before retry..."
+            sleep 5
+          done
+
+          if [ "$success" -ne 1 ]; then
+            echo "ERROR: Failed to download command line tools after $MAX_ATTEMPTS attempts."
+            echo "Last attempt exit code: $?"
+            # show some network debugging
+            echo "=== Network debug ==="
+            nslookup dl.google.com || true
+            ping -c 3 dl.google.com || true
+            curl -I "$CMDLINE_URL" || true
+            exit 1
+          fi
 
           # unzip into cmdline-tools dir
           mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
@@ -72,7 +104,7 @@ jobs:
           # Accept licenses (non-interactive)
           yes | sdkmanager --sdk_root="$ANDROID_SDK_ROOT" --licenses || true
 
-          # Install required packages with a few retries to account for transient network issues
+          # Install required packages (with retries)
           attempts=0
           until [ $attempts -ge 3 ]
           do
@@ -92,13 +124,11 @@ jobs:
           PATH: ${{ runner.temp }}/android-sdk/cmdline-tools/latest/bin:${PATH}
         run: |
           npm install -g @capacitor/cli@5
-          # Sync Capacitor (copies web build into native project)
           npx cap sync android || true
 
       - name: Ensure android folder exists (add if missing)
         if: always()
         run: |
-          # If android folder doesn't exist, attempt to add it (may require valid Capacitor config)
           if [ ! -d "./android" ]; then
             echo "android folder missing — attempting to add Android platform via Capacitor"
             npx cap add android || true
@@ -113,7 +143,6 @@ jobs:
           JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
           PATH: ${{ runner.temp }}/android-sdk/platform-tools:${PATH}
         run: |
-          # Ensure gradlew is executable
           if [ -f ./gradlew ]; then
             chmod +x ./gradlew || true
             ./gradlew assembleDebug --no-daemon
