@@ -1,62 +1,91 @@
-name: Build Android APK
+name: Build Android APK (Capacitor + Vite)
 
 on:
   push:
-    branches:
-      - master  # Change this if your main branch is named differently (e.g., master)
-  pull_request:
-    branches:
-      - master
+    branches: [ main, master ]
+  workflow_dispatch:
 
 jobs:
-  build:
-    name: Build APK
+  build-apk:
     runs-on: ubuntu-latest
+    env:
+      NODE_VERSION: '18'
+      JAVA_VERSION: '17'
 
     steps:
-      # 1. Checkout the repository
-      - name: Checkout Source
-        uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      # 2. Set up JDK (Required for Android builds)
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install NPM dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Build web assets (Vite)
+        run: npm run build
+
       - name: Set up JDK 17
         uses: actions/setup-java@v3
         with:
           distribution: 'temurin'
-          java-version: '17'
+          java-version: ${{ env.JAVA_VERSION }}
 
-      # 3. Set up Node.js (Required for React build)
-      - name: Set up Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: '18'
-          cache: 'npm'
-
-      # 4. Install Dependencies
-      - name: Install Dependencies
-        run: npm ci # Uses package-lock.json for consistent installs
-
-      # 5. Build the React Web App
-      - name: Build Web App
-        run: npm run build
-
-      # 6. Initialize Capacitor & Sync Android
-      # Note: We add the platform here in CI to ensure fresh state
-      - name: Sync Android Project
+      - name: Install required OS packages
         run: |
-          npx cap add android
-          npx cap sync android
+          sudo apt-get update -y
+          sudo apt-get install -y unzip wget zip lib32stdc++6 lib32gcc-s1
 
-      # 7. Build the APK with Gradle
-      - name: Build Debug APK
-        run: |
-          cd android
-          chmod +x gradlew
-          ./gradlew assembleDebug
-
-      # 8. Upload the APK as an Artifact
-      - name: Upload APK
-        uses: actions/upload-artifact@v3
+      - name: Setup Android SDK, platform-tools and build-tools
+        uses: android-actions/setup-android@v3
         with:
-          name: app-debug
+          packages: |
+            platform-tools
+            platforms;android-33
+            build-tools;33.0.2
+
+      - name: Verify Android SDK
+        run: |
+          echo "ANDROID_HOME: $ANDROID_HOME"
+          sdkmanager --list || true
+          adb --version || true
+
+      - name: Setup Capacitor CLI and prepare Android project
+        env:
+          JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
+          ANDROID_SDK_ROOT: ${{ env.ANDROID_HOME }}
+        run: |
+          npm install -g @capacitor/cli@5
+          # Try to add android platform if it doesn't exist (may fail depending on config)
+          if [ ! -d "./android" ]; then
+            echo "Adding android platform"
+            npx cap add android || true
+          fi
+          npx cap sync android || true
+
+      - name: Build Android APK (Gradle assembleDebug)
+        working-directory: android
+        env:
+          JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
+          ANDROID_SDK_ROOT: ${{ env.ANDROID_HOME }}
+          ANDROID_HOME: ${{ env.ANDROID_HOME }}
+          PATH: ${{ env.ANDROID_HOME }}/platform-tools:${PATH}
+        run: |
+          if [ -f ./gradlew ]; then
+            chmod +x ./gradlew
+            ./gradlew assembleDebug --no-daemon
+          else
+            echo "gradlew not found in android directory — cannot run Gradle build"
+            exit 1
+          fi
+
+      - name: Upload debug APK artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: getwork-debug-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
