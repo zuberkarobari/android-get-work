@@ -3,10 +3,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 /**
  * ==============================================================================
  * 🎨 DESIGN SYSTEM (Meta Philosophy)
- * Focused on "Glanceability", high visual hierarchy, and thumb-friendly interactions.
- * * 🏗️ ARCHITECTURE (Google Philosophy)
- * Zero-dependency, monolithic component structure for maximum portability and
- * build stability. Inline SVG icons to prevent dependency hell.
+ * ... (file contains icons, components, data and App)
  * ==============================================================================
  */
 
@@ -43,7 +40,6 @@ const Icons = {
 };
 
 // --- 2. ROBUST DATA MODEL ---
-
 const PARENT_CATEGORIES = [
   {
     id: 'Home_Maintenance',
@@ -85,7 +81,7 @@ const DURATIONS = [
 ];
 
 const getAllSubcategories = () => {
-  return PARENT_CATEGORIES.flatMap(parent => 
+  return PARENT_CATEGORIES.flatMap(parent =>
     parent.subcategories.map(sub => ({
       ...sub,
       parentId: parent.id,
@@ -125,7 +121,6 @@ const INITIAL_JOBS = [
 ];
 
 // --- 3. REUSABLE COMPONENTS ---
-
 const ReliableImage = ({ src, alt, className }) => {
   const [error, setError] = useState(false);
   if (error) {
@@ -143,8 +138,8 @@ const FilterChip = ({ label, isActive, onClick, icon: Icon }) => (
     onClick={onClick}
     className={`
       flex items-center gap-2 px-4 py-2.5 rounded-full text-sm font-medium transition-all duration-200 whitespace-nowrap snap-start
-      ${isActive 
-        ? 'bg-gray-900 text-white shadow-md scale-105' 
+      ${isActive
+        ? 'bg-gray-900 text-white shadow-md scale-105'
         : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
       }
     `}
@@ -193,8 +188,8 @@ const JobCard = ({ job }) => (
         <p className="text-xs text-gray-400 font-medium uppercase">Budget</p>
         <p className="text-lg font-extrabold text-gray-900">{job.budget}</p>
       </div>
-      
-      <a 
+
+      <a
         href={`tel:${job.contact}`}
         className="flex items-center gap-2 bg-green-600 text-white px-5 py-2.5 rounded-xl font-bold shadow-lg shadow-green-200 hover:bg-green-700 hover:scale-105 active:scale-95 transition-all no-underline"
       >
@@ -206,7 +201,6 @@ const JobCard = ({ job }) => (
 );
 
 // --- 4. SCREEN: TAKE WORK (The New Design) ---
-
 const TakeWork = ({ onNavigate, jobs }) => {
   const [activeFilter, setActiveFilter] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
@@ -214,7 +208,7 @@ const TakeWork = ({ onNavigate, jobs }) => {
   const allCategories = useMemo(() => PARENT_CATEGORIES.flatMap(p => p.subcategories), []);
   const filteredJobs = useMemo(() => jobs.filter(job => {
       const matchesCategory = activeFilter === 'All' || job.category === activeFilter;
-      const matchesSearch = job.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
+      const matchesSearch = job.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
                             job.location.toLowerCase().includes(searchQuery.toLowerCase());
       return matchesCategory && matchesSearch;
   }), [jobs, activeFilter, searchQuery]);
@@ -252,10 +246,10 @@ const TakeWork = ({ onNavigate, jobs }) => {
         <div className="flex overflow-x-auto gap-2 px-4 pb-4 no-scrollbar items-center snap-x">
              <FilterChip label="All Jobs" isActive={activeFilter === 'All'} onClick={() => setActiveFilter('All')} icon={Icons.LayoutGrid} />
              {allCategories.map(cat => (
-               <FilterChip 
-                 key={cat.id} 
-                 label={cat.label} 
-                 isActive={activeFilter === cat.id} 
+               <FilterChip
+                 key={cat.id}
+                 label={cat.label}
+                 isActive={activeFilter === cat.id}
                  onClick={() => setActiveFilter(cat.id)}
                />
              ))}
@@ -296,14 +290,14 @@ const TakeWork = ({ onNavigate, jobs }) => {
 // --- 5. SCREEN: LANDING ---
 const LandingPage = ({ onNavigate }) => {
   const [lang, setLang] = useState('en');
-  const t = lang === 'en' ? 
-    { title: "Get-Work", sub: "India's Local Service Marketplace", give: "Give Work", take: "Take Work" } : 
+  const t = lang === 'en' ?
+    { title: "Get-Work", sub: "India's Local Service Marketplace", give: "Give Work", take: "Take Work" } :
     { title: "Get-Work", sub: "भारत का अपना लोकल मार्केटप्लेस", give: "काम दें", take: "काम लें" };
 
   return (
     <div className="min-h-screen bg-white flex flex-col relative overflow-hidden">
       <div className="absolute top-0 left-0 right-0 h-[50vh] bg-gradient-to-br from-orange-500 to-orange-600 rounded-b-[3rem] z-0"></div>
-      
+
       <div className="relative z-10 flex-1 flex flex-col px-6 pt-12 pb-6">
         <div className="flex justify-between items-center mb-10">
            <div className="bg-white/20 backdrop-blur-md p-2 rounded-xl text-white">
