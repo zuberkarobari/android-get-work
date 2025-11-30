@@ -11,7 +11,9 @@ jobs:
     env:
       NODE_VERSION: '18'
       JAVA_VERSION: '17'
-      CMDLINE_URL: 'https://dl.google.com/android/repository/commandlinetools-linux-10125470_latest.zip'
+      ANDROID_API_LEVEL: '33'
+      BUILD_TOOLS_VERSION: '33.0.2'
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -29,99 +31,30 @@ jobs:
       - name: Build web assets (Vite)
         run: npm run build
 
-      - name: Install Java (OpenJDK 17) and basic tools
+      - name: Install Java (OpenJDK 17)
         run: |
           sudo apt-get update -y
           sudo apt-get install -y openjdk-${{ env.JAVA_VERSION }}-jdk unzip wget zip lib32stdc++6 lib32gcc-s1
 
-      - name: Install Android SDK cmdline tools and platforms (robust download)
-        env:
-          ANDROID_SDK_ROOT: ${{ runner.temp }}/android-sdk
-          CMDLINE_URL: ${{ env.CMDLINE_URL }}
+      - name: Set up Android SDK, platform-tools and build-tools
+        uses: r0adkll/setup-android@v2
+        with:
+          api-level: ${{ env.ANDROID_API_LEVEL }}
+          build-tools: ${{ env.BUILD_TOOLS_VERSION }}
+          target: android-${{ env.ANDROID_API_LEVEL }}
+          # optionally set ndk-version if needed:
+          # ndk-version: '21.3.6528147'
+
+      - name: Verify Android SDK
         run: |
-          set -eux
-
-          sudo apt-get update -y
-          sudo apt-get install -y unzip wget zip lib32stdc++6 lib32gcc-s1
-
-          export ANDROID_SDK_ROOT=${{ runner.temp }}/android-sdk
-          mkdir -p "$ANDROID_SDK_ROOT"
-          cd "$ANDROID_SDK_ROOT"
-
-          TMP_ZIP=/tmp/cmdline.zip
-          MAX_ATTEMPTS=5
-          attempt=0
-          success=0
-
-          while [ $attempt -lt $MAX_ATTEMPTS ]; do
-            attempt=$((attempt+1))
-            echo "Download attempt $attempt/$MAX_ATTEMPTS..."
-            # try wget first
-            if wget -q -O "$TMP_ZIP" "$CMDLINE_URL"; then
-              echo "Downloaded with wget"
-              success=1
-              break
-            fi
-            # fallback to curl
-            if command -v curl >/dev/null 2>&1 && curl -fSL -o "$TMP_ZIP" "$CMDLINE_URL"; then
-              echo "Downloaded with curl"
-              success=1
-              break
-            fi
-            echo "Download attempt $attempt failed; sleeping before retry..."
-            sleep 5
-          done
-
-          if [ "$success" -ne 1 ]; then
-            echo "ERROR: Failed to download command line tools after $MAX_ATTEMPTS attempts."
-            echo "Last attempt exit code: $?"
-            # show some network debugging
-            echo "=== Network debug ==="
-            nslookup dl.google.com || true
-            ping -c 3 dl.google.com || true
-            curl -I "$CMDLINE_URL" || true
-            exit 1
-          fi
-
-          # unzip into cmdline-tools dir
-          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
-          unzip -q "$TMP_ZIP" -d "$ANDROID_SDK_ROOT/cmdline-tools"
-
-          # Normalize to cmdline-tools/latest
-          if [ -d "$ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools" ]; then
-            mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools/latest"
-            mv "$ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools"/* "$ANDROID_SDK_ROOT/cmdline-tools/latest/"
-          elif [ -d "$ANDROID_SDK_ROOT/cmdline-tools/tools" ]; then
-            mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools/latest"
-            mv "$ANDROID_SDK_ROOT/cmdline-tools/tools"/* "$ANDROID_SDK_ROOT/cmdline-tools/latest/"
-          else
-            mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools/latest"
-            mv "$ANDROID_SDK_ROOT/cmdline-tools"/* "$ANDROID_SDK_ROOT/cmdline-tools/latest/" || true
-          fi
-
-          export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH"
-
-          # Accept licenses (non-interactive)
-          yes | sdkmanager --sdk_root="$ANDROID_SDK_ROOT" --licenses || true
-
-          # Install required packages (with retries)
-          attempts=0
-          until [ $attempts -ge 3 ]
-          do
-            sdkmanager --sdk_root="$ANDROID_SDK_ROOT" "platform-tools" "platforms;android-33" "build-tools;33.0.2" && break
-            attempts=$((attempts+1))
-            echo "sdkmanager install failed; retrying ($attempts/3)..."
-            sleep 5
-          done
-
-          # show installed packages for debugging
-          sdkmanager --sdk_root="$ANDROID_SDK_ROOT" --list || true
+          echo "ANDROID_HOME: $ANDROID_HOME"
+          sdkmanager --list || true
+          adb --version || true
 
       - name: Setup Capacitor CLI and prepare Android project
         env:
-          ANDROID_SDK_ROOT: ${{ runner.temp }}/android-sdk
           JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
-          PATH: ${{ runner.temp }}/android-sdk/cmdline-tools/latest/bin:${PATH}
+          ANDROID_SDK_ROOT: ${{ env.ANDROID_HOME }}
         run: |
           npm install -g @capacitor/cli@5
           npx cap sync android || true
@@ -139,9 +72,10 @@ jobs:
       - name: Build Android APK (Gradle assembleDebug)
         working-directory: android
         env:
-          ANDROID_SDK_ROOT: ${{ runner.temp }}/android-sdk
           JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
-          PATH: ${{ runner.temp }}/android-sdk/platform-tools:${PATH}
+          ANDROID_SDK_ROOT: ${{ env.ANDROID_HOME }}
+          ANDROID_HOME: ${{ env.ANDROID_HOME }}
+          PATH: ${{ env.ANDROID_HOME }}/platform-tools:${PATH}
         run: |
           if [ -f ./gradlew ]; then
             chmod +x ./gradlew || true
