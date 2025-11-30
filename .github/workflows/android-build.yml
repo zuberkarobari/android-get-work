@@ -21,48 +21,86 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
 
-      - name: Install dependencies
+      - name: Install NPM dependencies
         run: npm install --no-audit --no-fund
 
       - name: Build web assets (Vite)
         run: npm run build
 
-      - name: Install Java
+      - name: Install Java (OpenJDK 17)
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y openjdk-${{ env.JAVA_VERSION }}-jdk unzip wget
+          sudo apt-get install -y openjdk-${{ env.JAVA_VERSION }}-jdk unzip wget zip lib32stdc++6 lib32gcc1
 
       - name: Install Android SDK cmdline tools and platforms
         env:
           ANDROID_SDK_ROOT: ${{ runner.temp }}/android-sdk
         run: |
-          set -e
-          export ANDROID_SDK_ROOT=${{ runner.temp }}/android-sdk
-          mkdir -p $ANDROID_SDK_ROOT/cmdline-tools
-          wget -q https://dl.google.com/android/repository/commandlinetools-linux-10125470_latest.zip -O /tmp/cmdline.zip
-          unzip -q /tmp/cmdline.zip -d $ANDROID_SDK_ROOT/cmdline-tools
-          # Move to 'latest' path expected by sdkmanager
-          mkdir -p $ANDROID_SDK_ROOT/cmdline-tools/latest
-          mv $ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools/* $ANDROID_SDK_ROOT/cmdline-tools/latest/
-          yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --sdk_root=$ANDROID_SDK_ROOT --install "platform-tools" "platforms;android-33" "build-tools;33.0.2"
+          set -eux
 
-      - name: Setup Capacitor (global) and Android build env
+          # ensure basic tools present
+          sudo apt-get update -y
+          sudo apt-get install -y unzip wget zip lib32stdc++6 lib32gcc1
+
+          export ANDROID_SDK_ROOT=${{ runner.temp }}/android-sdk
+          mkdir -p "$ANDROID_SDK_ROOT"
+          cd "$ANDROID_SDK_ROOT"
+
+          # Download the command line tools zip
+          TMP_ZIP=/tmp/cmdline.zip
+          wget -q -O "$TMP_ZIP" "https://dl.google.com/android/repository/commandlinetools-linux-10125470_latest.zip"
+
+          # unzip into cmdline-tools dir
+          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
+          unzip -q "$TMP_ZIP" -d "$ANDROID_SDK_ROOT/cmdline-tools"
+
+          # Normalize to cmdline-tools/latest
+          if [ -d "$ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools" ]; then
+            mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools/latest"
+            mv "$ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools"/* "$ANDROID_SDK_ROOT/cmdline-tools/latest/"
+          elif [ -d "$ANDROID_SDK_ROOT/cmdline-tools/tools" ]; then
+            mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools/latest"
+            mv "$ANDROID_SDK_ROOT/cmdline-tools/tools"/* "$ANDROID_SDK_ROOT/cmdline-tools/latest/"
+          else
+            mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools/latest"
+            mv "$ANDROID_SDK_ROOT/cmdline-tools"/* "$ANDROID_SDK_ROOT/cmdline-tools/latest/" || true
+          fi
+
+          export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH"
+
+          # Accept licenses (non-interactive)
+          yes | sdkmanager --sdk_root="$ANDROID_SDK_ROOT" --licenses || true
+
+          # Install required packages with a few retries to account for transient network issues
+          attempts=0
+          until [ $attempts -ge 3 ]
+          do
+            sdkmanager --sdk_root="$ANDROID_SDK_ROOT" "platform-tools" "platforms;android-33" "build-tools;33.0.2" && break
+            attempts=$((attempts+1))
+            echo "sdkmanager install failed; retrying ($attempts/3)..."
+            sleep 5
+          done
+
+          # show installed packages for debugging
+          sdkmanager --sdk_root="$ANDROID_SDK_ROOT" --list || true
+
+      - name: Setup Capacitor CLI and prepare Android project
         env:
           ANDROID_SDK_ROOT: ${{ runner.temp }}/android-sdk
           JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
+          PATH: ${{ runner.temp }}/android-sdk/cmdline-tools/latest/bin:${PATH}
         run: |
           npm install -g @capacitor/cli@5
-          # Ensure web assets are copied and Capacitor project is prepared
+          # Sync Capacitor (copies web build into native project)
           npx cap sync android || true
 
-      - name: Ensure android folder exists (if not, create)
+      - name: Ensure android folder exists (add if missing)
         if: always()
         run: |
-          # If npx cap add android was not run previously (no android folder), try to add it.
+          # If android folder doesn't exist, attempt to add it (may require valid Capacitor config)
           if [ ! -d "./android" ]; then
-            echo "android folder missing — adding Android platform via Capacitor"
+            echo "android folder missing — attempting to add Android platform via Capacitor"
             npx cap add android || true
           else
             echo "android folder exists"
@@ -73,11 +111,19 @@ jobs:
         env:
           ANDROID_SDK_ROOT: ${{ runner.temp }}/android-sdk
           JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
+          PATH: ${{ runner.temp }}/android-sdk/platform-tools:${PATH}
         run: |
-          chmod +x ./gradlew || true
-          ./gradlew assembleDebug --no-daemon
+          # Ensure gradlew is executable
+          if [ -f ./gradlew ]; then
+            chmod +x ./gradlew || true
+            ./gradlew assembleDebug --no-daemon
+          else
+            echo "gradlew not found in android directory — cannot run Gradle build"
+            exit 1
+          fi
 
       - name: Upload debug APK artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: getwork-debug-apk
