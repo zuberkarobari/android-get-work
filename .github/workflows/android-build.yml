@@ -11,7 +11,6 @@ jobs:
     env:
       NODE_VERSION: '18'
       JAVA_VERSION: '17'
-      # Android SDK vars used by setup-android action
       ANDROID_API_LEVEL: '33'
       BUILD_TOOLS_VERSION: '33.0.2'
 
@@ -43,19 +42,36 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y unzip wget zip lib32stdc++6 lib32gcc-s1
 
-      - name: Setup Android SDK, platform-tools and build-tools
+      - name: Install Android commandline tools (via action)
         uses: android-actions/setup-android@v3
+        # do NOT pass 'packages' here; we'll call sdkmanager explicitly next
         with:
-          packages: |
-            platform-tools
-            platforms;android-33
-            build-tools;33.0.2
+          cmdline-tools-version: 'latest'
+
+      - name: Install Android platform-tools, platforms and build-tools (explicit sdkmanager call)
+        env:
+          ANDROID_SDK_ROOT: ${{ env.ANDROID_HOME }}
+          ANDROID_HOME: ${{ env.ANDROID_HOME }}
+          PATH: ${{ env.ANDROID_HOME }}/cmdline-tools/latest/bin:${{ env.ANDROID_HOME }}/platform-tools:${PATH}
+        run: |
+          set -eux
+          # show sdkmanager path for debugging
+          which sdkmanager || true
+          sdkmanager --version || true
+
+          # Accept licenses first (non-interactive)
+          yes | sdkmanager --licenses || true
+
+          # Install the required packages with explicit quoting -- this avoids newline concatenation issues
+          sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.2"
+
+          # show installed packages
+          sdkmanager --list || true
 
       - name: Verify Android SDK (debug)
         run: |
           echo "ANDROID_HOME: $ANDROID_HOME"
           echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
-          sdkmanager --list || true
           adb --version || true
 
       - name: Setup Capacitor CLI and prepare Android project
@@ -68,12 +84,11 @@ jobs:
           # Try to add android platform if it doesn't exist
           if [ ! -d "./android" ]; then
             echo "android folder not found — attempting to add android platform via Capacitor"
-            # Will create android/ if capacitor.config.json is correct (appId/appName/webDir)
             npx cap add android || true
           else
             echo "android folder exists"
           fi
-          # copy web assets into native project
+          # copy web build into native project
           npx cap sync android || true
 
       - name: Build Android APK (Gradle assembleDebug)
